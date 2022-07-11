@@ -235,6 +235,7 @@ pub struct Function {
     pub attributes: Vec<Attribute>,
     pub vis_marker: Option<VisMarker>,
     pub qualifiers: FunctionQualifiers,
+    pub tk_fn_keyword: Ident,
     pub name: Ident,
     pub generic_params: Option<GenericParamList>,
     pub tk_params_parens: GroupSpan,
@@ -242,6 +243,7 @@ pub struct Function {
     pub where_clause: Option<WhereClause>,
     pub tk_return_arrow: Option<[Punct; 2]>,
     pub return_ty: Option<TyExpr>,
+    pub tk_semicolon: Option<Punct>,
     pub body: Option<Group>,
 }
 
@@ -906,7 +908,7 @@ impl ToTokens for Function {
         }
         self.vis_marker.to_tokens(tokens);
         self.qualifiers.to_tokens(tokens);
-        tokens.append(Ident::new("fn", Span::call_site()));
+        self.tk_fn_keyword.to_tokens(tokens);
         self.name.to_tokens(tokens);
         self.generic_params.to_tokens(tokens);
         self.tk_params_parens.quote_with(tokens, |tokens| {
@@ -922,7 +924,7 @@ impl ToTokens for Function {
         if let Some(body) = self.body.as_ref() {
             body.to_tokens(tokens);
         } else {
-            tokens.append(Punct::new(';', Spacing::Alone))
+            self.tk_semicolon.as_ref().unwrap().to_tokens(tokens);
         }
     }
 }
