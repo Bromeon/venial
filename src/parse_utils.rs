@@ -48,7 +48,7 @@ pub(crate) fn consume_attributes(tokens: &mut TokenIter) -> Vec<Attribute> {
                 Some(TokenTree::Punct(punct)) if punct.as_char() == ':' => (),
                 Some(token) => panic!("cannot parse attribute: expected one of `(`, `::`, `=`, `[`, `]`, or `{{`, found {:?}", token),
             };
-            path.push(attribute_tokens.next().unwrap());
+            path.push(attribute_tokens.next().expect("consume_attributes"));
         }
 
         let value = match attribute_tokens.peek() {
@@ -88,7 +88,7 @@ pub(crate) fn consume_vis_marker(tokens: &mut TokenIter) -> Option<VisMarker> {
                 Some(TokenTree::Group(group)) if group.delimiter() == Delimiter::Parenthesis => {
                     Some(VisMarker {
                         tk_token1: pub_token,
-                        tk_token2: Some(tokens.next().unwrap()),
+                        tk_token2: Some(tokens.next().expect("consume_vis_marker 1")),
                     })
                 }
                 _ => Some(VisMarker {
@@ -98,7 +98,7 @@ pub(crate) fn consume_vis_marker(tokens: &mut TokenIter) -> Option<VisMarker> {
             }
         }
         Some(TokenTree::Ident(ident)) if ident == "crate" => Some(VisMarker {
-            tk_token1: tokens.next().unwrap(),
+            tk_token1: tokens.next().expect("consume_vis_marker 2"),
             tk_token2: None,
         }),
         _ => None,
@@ -148,7 +148,7 @@ pub(crate) fn consume_stuff_until(
             break;
         }
 
-        output_tokens.push(tokens.next().unwrap());
+        output_tokens.push(tokens.next().expect("consume_stuff_until"));
     }
 
     if must_find_predicate && !predicate_met {
@@ -170,7 +170,7 @@ pub(crate) fn consume_comma(tokens: &mut TokenIter) -> Option<Punct> {
     match tokens.peek() {
         Some(TokenTree::Punct(punct)) if punct.as_char() == ',' => {
             let punct = punct.clone();
-            tokens.next().unwrap();
+            tokens.next().expect("consume_comma");
             Some(punct)
         }
         _ => None,

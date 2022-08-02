@@ -63,13 +63,13 @@ pub fn parse_declaration(tokens: TokenStream) -> Result<Declaration, Error> {
     let declaration = match tokens.peek().cloned() {
         Some(TokenTree::Ident(keyword)) if keyword == "struct" => {
             // struct keyword
-            tokens.next().unwrap();
+            tokens.next().expect("struct");
 
             let struct_name = consume_declaration_name(&mut tokens);
             let generic_params = consume_generic_params(&mut tokens);
             let mut where_clause = consume_where_clause(&mut tokens);
 
-            let struct_fields = match tokens.peek().unwrap() {
+            let struct_fields = match tokens.peek().expect("struct_fields") {
                 TokenTree::Punct(punct) if punct.as_char() == ';' => StructFields::Unit,
                 TokenTree::Group(group) if group.delimiter() == Delimiter::Parenthesis => {
                     let group = group.clone();
@@ -94,7 +94,7 @@ pub fn parse_declaration(tokens: TokenStream) -> Result<Declaration, Error> {
             let semicolon = match tokens.peek() {
                 Some(TokenTree::Punct(punct)) if punct.as_char() == ';' => {
                     let punct = punct.clone();
-                    tokens.next().unwrap();
+                    tokens.next().expect("struct semicolon");
                     Some(punct)
                 }
                 _ => None,
@@ -113,13 +113,13 @@ pub fn parse_declaration(tokens: TokenStream) -> Result<Declaration, Error> {
         }
         Some(TokenTree::Ident(keyword)) if keyword == "enum" => {
             // enum keyword
-            tokens.next().unwrap();
+            tokens.next().expect("enum");
 
             let enum_name = consume_declaration_name(&mut tokens);
             let generic_params = consume_generic_params(&mut tokens);
             let where_clause = consume_where_clause(&mut tokens);
 
-            let (group, enum_variants) = match tokens.next().unwrap() {
+            let (group, enum_variants) = match tokens.next().expect("enum variant") {
                 TokenTree::Group(group) if group.delimiter() == Delimiter::Brace => {
                     (group.clone(), parse_enum_variants(group.stream()))
                 }
@@ -139,13 +139,13 @@ pub fn parse_declaration(tokens: TokenStream) -> Result<Declaration, Error> {
         }
         Some(TokenTree::Ident(keyword)) if keyword == "union" => {
             // union keyword
-            tokens.next().unwrap();
+            tokens.next().expect("union");
 
             let union_name = consume_declaration_name(&mut tokens);
             let generic_params = consume_generic_params(&mut tokens);
             let where_clause = consume_where_clause(&mut tokens);
 
-            let union_fields = match tokens.next().unwrap() {
+            let union_fields = match tokens.next().expect("union fields") {
                 TokenTree::Group(group) if group.delimiter() == Delimiter::Brace => {
                     parse_named_fields(group)
                 }
@@ -164,7 +164,7 @@ pub fn parse_declaration(tokens: TokenStream) -> Result<Declaration, Error> {
         }
         Some(TokenTree::Ident(keyword)) if keyword == "impl" => {
             // impl keyword
-            tokens.next().unwrap();
+            tokens.next().expect("impl");
 
             let impl_generic_params = consume_generic_params(&mut tokens);
             let trait_or_self_ty = consume_stuff_until(&mut tokens,|tk| match tk {
@@ -195,7 +195,7 @@ pub fn parse_declaration(tokens: TokenStream) -> Result<Declaration, Error> {
 
             let where_clause = consume_where_clause(&mut tokens);
 
-            let (body_items, tk_braces) = match tokens.next().unwrap() {
+            let (body_items, tk_braces) = match tokens.next().expect("where clause") {
                 TokenTree::Group(group) if group.delimiter() == Delimiter::Brace => {
                     parse_impl_members(group)
                 }

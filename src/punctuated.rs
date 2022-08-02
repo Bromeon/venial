@@ -104,9 +104,9 @@ impl<T: ToTokens> ToTokens for Punctuated<T> {
             item.to_tokens(tokens);
             tokens.append(punct.clone());
         }
-        self.inner.last().unwrap().0.to_tokens(tokens);
+        self.inner.last().expect("Punctuated::to_tokens 1").0.to_tokens(tokens);
         if !self.skip_last {
-            tokens.append(self.inner.last().unwrap().1.clone());
+            tokens.append(self.inner.last().expect("Punctuated::to_tokens 2").1.clone());
         }
     }
 }

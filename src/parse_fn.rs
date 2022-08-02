@@ -123,7 +123,7 @@ pub(crate) fn parse_fn_params(tokens: TokenStream) -> Punctuated<FnParam> {
             })
         } else {
             // TODO - handle non-ident argument names
-            let ident = parse_ident(tokens.next().unwrap()).unwrap();
+            let ident = parse_ident(tokens.next().expect("parse_fn 1")).expect("parse_fn 2");
             let tk_colon = match tokens.next() {
                 Some(TokenTree::Punct(punct)) if punct.as_char() == ':' => punct.clone(),
                 _ => panic!("cannot parse fn params"),
@@ -151,7 +151,7 @@ pub(crate) fn consume_fn_return(tokens: &mut TokenIter) -> Option<([Punct; 2], T
         Some(TokenTree::Punct(punct)) if punct.as_char() == '-' => punct.clone(),
         _ => return None,
     };
-    tokens.next().unwrap();
+    tokens.next().expect("consume_fn");
 
     let tip = match tokens.next() {
         Some(TokenTree::Punct(punct)) if punct.as_char() == '>' => punct,
@@ -206,7 +206,7 @@ pub(crate) fn try_consume_fn(
     let fn_name = consume_declaration_name(tokens);
     let generic_params = consume_generic_params(tokens);
 
-    let (params, tk_params_parens) = match tokens.next().unwrap() {
+    let (params, tk_params_parens) = match tokens.next().expect("try_consume_fn") {
         TokenTree::Group(group) if group.delimiter() == Delimiter::Parenthesis => {
             (parse_fn_params(group.stream()), GroupSpan::new(&group))
         }
@@ -221,7 +221,7 @@ pub(crate) fn try_consume_fn(
 
     let where_clause = consume_where_clause(tokens);
 
-    let (function_body, tk_semicolon) = match &tokens.next().unwrap() {
+    let (function_body, tk_semicolon) = match &tokens.next().expect("consume_fn group") {
         TokenTree::Group(group) if group.delimiter() == Delimiter::Brace => {
             (Some(group.clone()), None)
         }

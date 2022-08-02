@@ -51,17 +51,17 @@ pub(crate) fn consume_generic_params(tokens: &mut TokenIter) -> Option<GenericPa
                 lt = punct.clone();
                 break;
             }
-            TokenTree::Punct(punct) if punct.as_char() == '\'' => Some(tokens.next().unwrap()),
-            TokenTree::Ident(ident) if ident == "const" => Some(tokens.next().unwrap()),
+            TokenTree::Punct(punct) if punct.as_char() == '\'' => Some(tokens.next().expect("generic_param '")),
+            TokenTree::Ident(ident) if ident == "const" => Some(tokens.next().expect("generic_param const")),
             TokenTree::Ident(_ident) => None,
             token => {
                 panic!("cannot parse generic params: unexpected token {:?}", token)
             }
         };
 
-        let name = parse_ident(tokens.next().unwrap()).unwrap();
+        let name = parse_ident(tokens.next().expect("generic_param 1")).expect("generic_param 2");
 
-        let bound = match tokens.peek().unwrap() {
+        let bound = match tokens.peek().expect("generic_param 3") {
             TokenTree::Punct(punct) if punct.as_char() == ':' => {
                 let colon = punct.clone();
                 // consume ':'
@@ -115,7 +115,7 @@ fn consume_generic_arg(tokens: Vec<TokenTree>) -> GenericArg {
     let mut tokens = tokens.into_iter().peekable();
 
     // Try parsing 'lifetime
-    if let TokenTree::Punct(punct) = tokens.peek().unwrap() {
+    if let TokenTree::Punct(punct) = tokens.peek().expect("generic_arg 1") {
         if punct.as_char() == '\'' {
             let tk_lifetime = punct.clone();
             tokens.next(); // consume '
@@ -146,7 +146,7 @@ fn consume_generic_arg(tokens: Vec<TokenTree>) -> GenericArg {
     // Then, try parsing Item = ...
     // (there is at least 1 token, so unwrap is safe)
     let before_ident = tokens.clone();
-    if let TokenTree::Ident(ident) = tokens.next().unwrap() {
+    if let TokenTree::Ident(ident) = tokens.next().expect("generic_arg 2") {
         if let Some(TokenTree::Punct(punct)) = tokens.next() {
             if punct.as_char() == '=' {
                 let remaining: Vec<TokenTree> = tokens.collect();
@@ -323,7 +323,7 @@ pub(crate) fn consume_enum_discriminant(
     // consume '='
     tokens.next();
 
-    let value_token = tokens.next().unwrap();
+    let value_token = tokens.next().expect("consume_enum_discriminant");
 
     // If the value expression has more than one token, we output an error.
     match tokens.peek() {
@@ -382,7 +382,7 @@ pub(crate) fn parse_named_fields(token_group: Group) -> NamedStructFields {
         let attributes = consume_attributes(&mut tokens);
         let vis_marker = consume_vis_marker(&mut tokens);
 
-        let ident = parse_ident(tokens.next().unwrap()).unwrap();
+        let ident = parse_ident(tokens.next().expect("parse_named_fields 1")).expect("parse_named_fields 2");
 
         let colon = match tokens.next() {
             Some(TokenTree::Punct(punct)) if punct.as_char() == ':' => punct,
@@ -425,7 +425,7 @@ pub(crate) fn parse_enum_variants(tokens: TokenStream) -> Result<Punctuated<Enum
         let attributes = consume_attributes(&mut tokens);
         let vis_marker = consume_vis_marker(&mut tokens);
 
-        let ident = parse_ident(tokens.next().unwrap()).unwrap();
+        let ident = parse_ident(tokens.next().expect("parse_enum_variants 1")).expect("parse_enum_variants 2");
 
         let contents = match tokens.peek() {
             None => StructFields::Unit,
