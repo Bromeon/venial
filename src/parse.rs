@@ -1,4 +1,5 @@
 use crate::error::Error;
+use crate::multipeek::multipeek;
 use crate::parse_impl::{
     consume_either_fn_type_const_static_impl, parse_const_or_static, parse_impl,
 };
@@ -7,12 +8,10 @@ use crate::parse_type::{
     consume_declaration_name, consume_generic_params, consume_where_clause, parse_enum_variants,
     parse_named_fields, parse_tuple_fields,
 };
-use crate::parse_utils::{consume_outer_attributes, consume_punct, consume_vis_marker};
+use crate::parse_utils::{consume_outer_attributes, consume_punct, consume_vis_marker, TokenIter};
 use crate::types::{Declaration, Enum, Struct, StructFields, Union};
 use crate::types_edition::GroupSpan;
-use proc_macro2::token_stream::IntoIter;
 use proc_macro2::{Delimiter, TokenStream, TokenTree};
-use std::iter::Peekable;
 
 // TODO - Return Result<...>, handle case where TokenStream is valid declaration,
 // but not a type or function.
@@ -59,13 +58,11 @@ use std::iter::Peekable;
 /// ```
 
 pub fn parse_declaration(tokens: TokenStream) -> Result<Declaration, Error> {
-    let mut tokens = tokens.into_iter().peekable();
+    let mut tokens = multipeek(tokens.into_iter());
     parse_declaration_tokens(&mut tokens)
 }
 
-pub(crate) fn parse_declaration_tokens(
-    tokens: &mut Peekable<IntoIter>,
-) -> Result<Declaration, Error> {
+pub(crate) fn parse_declaration_tokens(tokens: &mut TokenIter) -> Result<Declaration, Error> {
     let attributes = consume_outer_attributes(tokens);
     let vis_marker = consume_vis_marker(tokens);
 

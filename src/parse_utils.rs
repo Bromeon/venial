@@ -1,14 +1,14 @@
+use crate::multipeek::{multipeek, Multipeek};
 use crate::parse_type::consume_generic_args;
 use crate::types::{Attribute, AttributeValue, Path, PathSegment, VisMarker};
 use crate::types_edition::GroupSpan;
 use proc_macro2::{Delimiter, Ident, Punct, Spacing, TokenStream, TokenTree};
-use std::iter::Peekable;
 
-pub(crate) type TokenIter = Peekable<proc_macro2::token_stream::IntoIter>;
+pub(crate) type TokenIter = Multipeek<proc_macro2::token_stream::IntoIter>;
 
 pub(crate) fn tokens_from_slice(slice: &[TokenTree]) -> TokenIter {
     let stream = TokenStream::from_iter(slice.iter().cloned());
-    stream.into_iter().peekable()
+    multipeek(stream.into_iter())
 }
 
 pub(crate) fn parse_any_ident(tokens: &mut TokenIter, panic_context: &str) -> Ident {
@@ -117,7 +117,7 @@ fn consume_attributes_with_inner(tokens: &mut TokenIter, expect_inner: bool) -> 
         };
 
         let tk_braces = GroupSpan::new(&group);
-        let mut attribute_tokens = group.stream().into_iter().peekable();
+        let mut attribute_tokens = multipeek(group.stream().into_iter());
 
         let mut path = Vec::new();
         loop {

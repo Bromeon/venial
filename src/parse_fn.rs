@@ -1,9 +1,10 @@
+use crate::multipeek::multipeek;
 use crate::parse_type::{
     consume_declaration_name, consume_field_type, consume_generic_params, consume_where_clause,
 };
 use crate::parse_utils::{
     consume_comma, consume_ident, consume_outer_attributes, consume_punct, consume_stuff_until,
-    parse_any_ident, parse_punct,
+    parse_any_ident, parse_punct, TokenIter,
 };
 use crate::punctuated::Punctuated;
 use crate::types::{
@@ -11,9 +12,6 @@ use crate::types::{
 };
 use crate::{Attribute, VisMarker};
 use proc_macro2::{Delimiter, Ident, Punct, TokenStream, TokenTree};
-use std::iter::Peekable;
-
-type TokenIter = Peekable<proc_macro2::token_stream::IntoIter>;
 
 /// If venial fails to parse the declaration as a function, it can detect that it
 /// is either a constant (`const` ambiguity), an impl or a module (`unsafe` ambiguity).
@@ -65,7 +63,7 @@ pub(crate) fn consume_fn_qualifiers(tokens: &mut TokenIter) -> FnQualifiers {
 fn parse_fn_params(tokens: TokenStream) -> Punctuated<FnParam> {
     let mut fields = Punctuated::new();
 
-    let mut tokens = tokens.into_iter().peekable();
+    let mut tokens = multipeek(tokens.into_iter());
     loop {
         if tokens.peek().is_none() {
             break;

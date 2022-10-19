@@ -1,7 +1,8 @@
 use crate::error::Error;
+use crate::multipeek::multipeek;
 use crate::parse_utils::{
     consume_colon2, consume_comma, consume_ident, consume_outer_attributes, consume_punct,
-    consume_stuff_until, consume_vis_marker, parse_any_ident, parse_punct,
+    consume_stuff_until, consume_vis_marker, parse_any_ident, parse_punct, TokenIter,
 };
 use crate::punctuated::Punctuated;
 use crate::types::{
@@ -11,9 +12,6 @@ use crate::types::{
 };
 use crate::types_edition::GroupSpan;
 use proc_macro2::{Delimiter, Group, Ident, Punct, TokenStream, TokenTree};
-use std::iter::Peekable;
-
-type TokenIter = Peekable<proc_macro2::token_stream::IntoIter>;
 
 // TODO - rename
 pub(crate) fn consume_declaration_name(tokens: &mut TokenIter) -> Ident {
@@ -96,7 +94,7 @@ pub(crate) fn consume_generic_params(tokens: &mut TokenIter) -> Option<GenericPa
 
 fn parse_generic_arg(tokens: Vec<TokenTree>) -> GenericArg {
     // Note: method not called if tokens is empty
-    let mut tokens = tokens.into_iter().peekable();
+    let mut tokens = multipeek(tokens.into_iter());
 
     // Try parsing 'lifetime
     if let TokenTree::Punct(punct) = tokens.peek().unwrap() {
@@ -309,7 +307,7 @@ pub(crate) fn consume_enum_discriminant(
 pub(crate) fn parse_tuple_fields(token_group: Group) -> TupleStructFields {
     let mut fields = Punctuated::new();
 
-    let mut tokens = token_group.stream().into_iter().peekable();
+    let mut tokens = multipeek(token_group.stream().into_iter());
     loop {
         if tokens.peek().is_none() {
             break;
@@ -341,7 +339,7 @@ pub(crate) fn parse_tuple_fields(token_group: Group) -> TupleStructFields {
 pub(crate) fn parse_named_fields(token_group: Group) -> NamedStructFields {
     let mut fields = Punctuated::new();
 
-    let mut tokens = token_group.stream().into_iter().peekable();
+    let mut tokens = multipeek(token_group.stream().into_iter());
     loop {
         if tokens.peek().is_none() {
             break;
@@ -377,7 +375,7 @@ pub(crate) fn parse_named_fields(token_group: Group) -> NamedStructFields {
 pub(crate) fn parse_enum_variants(tokens: TokenStream) -> Result<Punctuated<EnumVariant>, Error> {
     let mut variants = Punctuated::new();
 
-    let mut tokens = tokens.into_iter().peekable();
+    let mut tokens = multipeek(tokens.into_iter());
     loop {
         if tokens.peek().is_none() {
             break;

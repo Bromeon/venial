@@ -63,6 +63,7 @@
 mod tests;
 
 mod error;
+mod multipeek;
 mod parse;
 mod parse_fn;
 mod parse_impl;

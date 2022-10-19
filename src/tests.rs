@@ -1,5 +1,6 @@
 use crate::{parse_declaration, Declaration, GenericParam, Struct, TyExpr, WhereClauseItem};
 
+use crate::multipeek::multipeek;
 use crate::parse_type::consume_generic_args;
 use crate::types::GenericArgList;
 use insta::assert_debug_snapshot;
@@ -28,7 +29,7 @@ fn parse_declaration_checked(tokens: TokenStream) -> Declaration {
 fn parse_generic_args_checked(tokens: TokenStream) -> GenericArgList {
     let initial_tokens = tokens.clone();
 
-    let mut token_iter = tokens.into_iter().peekable();
+    let mut token_iter = multipeek(tokens.into_iter());
     let generic_args = consume_generic_args(&mut token_iter).unwrap();
 
     similar_asserts::assert_str_eq!(quote!(#generic_args), initial_tokens);

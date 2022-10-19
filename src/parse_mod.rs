@@ -1,3 +1,4 @@
+use crate::multipeek::multipeek;
 use crate::parse::parse_declaration_tokens;
 use crate::parse_type::consume_declaration_name;
 use crate::parse_utils::{
@@ -5,12 +6,10 @@ use crate::parse_utils::{
     TokenIter,
 };
 use crate::{Attribute, GroupSpan, Module, TyExpr, UseDeclaration, VisMarker};
-use proc_macro2::token_stream::IntoIter;
 use proc_macro2::{Delimiter, TokenTree};
-use std::iter::Peekable;
 
 pub(crate) fn parse_mod(
-    tokens: &mut Peekable<IntoIter>,
+    tokens: &mut TokenIter,
     attributes: Vec<Attribute>,
     vis_marker: Option<VisMarker>,
 ) -> Module {
@@ -35,7 +34,7 @@ pub(crate) fn parse_mod(
     if let Some(group) = group {
         // Parse mod block body
         let mut mod_members = vec![];
-        let mut tokens = group.stream().into_iter().peekable();
+        let mut tokens = multipeek(group.stream().into_iter());
 
         tk_braces = Some(GroupSpan::new(&group));
         inner_attributes = consume_inner_attributes(&mut tokens);

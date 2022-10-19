@@ -1,3 +1,4 @@
+use crate::multipeek::multipeek;
 use crate::parse_utils::{consume_path, tokens_from_slice};
 pub use crate::types::{
     Attribute, AttributeValue, Declaration, Enum, EnumVariant, EnumVariantValue, Function,
@@ -665,7 +666,7 @@ impl WhereClauseItem {
     ///
     /// Panics if given a token stream that isn't a valid where-clause item.
     pub fn parse(tokens: TokenStream) -> Self {
-        let mut tokens = tokens.into_iter().peekable();
+        let mut tokens = multipeek(tokens.into_iter());
 
         let left_side = crate::parse_utils::consume_stuff_until(
             &mut tokens,

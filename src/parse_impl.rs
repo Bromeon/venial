@@ -1,17 +1,15 @@
+use crate::multipeek::multipeek;
 use crate::parse_fn::{consume_fn, NotFunction};
 use crate::parse_mod::parse_mod;
 use crate::parse_type::{consume_generic_params, consume_where_clause};
 use crate::parse_utils::{
     consume_ident, consume_inner_attributes, consume_outer_attributes, consume_punct,
-    consume_stuff_until, consume_vis_marker, parse_any_ident, parse_ident, parse_punct,
+    consume_stuff_until, consume_vis_marker, parse_any_ident, parse_ident, parse_punct, TokenIter,
 };
 use crate::types::{Constant, ImplMember, TyDefinition, ValueExpr};
 use crate::types_edition::GroupSpan;
 use crate::{Attribute, Declaration, Impl, TyExpr, VisMarker};
 use proc_macro2::{Delimiter, Group, TokenTree};
-use std::iter::Peekable;
-
-type TokenIter = Peekable<proc_macro2::token_stream::IntoIter>;
 
 pub(crate) fn parse_const_or_static(
     tokens: &mut TokenIter,
@@ -141,7 +139,7 @@ pub(crate) fn consume_either_fn_type_const_static_impl(
 pub(crate) fn parse_impl_body(token_group: Group) -> (GroupSpan, Vec<Attribute>, Vec<ImplMember>) {
     let mut body_items = vec![];
 
-    let mut tokens = token_group.stream().into_iter().peekable();
+    let mut tokens = multipeek(token_group.stream().into_iter());
     let inner_attributes = consume_inner_attributes(&mut tokens);
     loop {
         if tokens.peek().is_none() {
