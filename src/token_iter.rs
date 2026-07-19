@@ -30,7 +30,7 @@ impl TokenIter {
     }
 
     /// Peek at the next token without consuming it.
-    pub(crate) fn peek(&self) -> Option<&TokenTree> {
+    pub fn peek(&self) -> Option<&TokenTree> {
         self.tokens.get(self.pos)
     }
 

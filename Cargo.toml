@@ -15,5 +15,11 @@ proc-macro2 = "1.0.36"
 quote = "1.0.15"
 
 [dev-dependencies]
+criterion = "0.5"
 insta = "1.12.0"
 similar-asserts = "1.2.0"
+syn = { version = "2", features = ["full", "parsing"] } # comparison baseline for benches
+
+[[bench]]
+name = "parse_items"
+harness = false
