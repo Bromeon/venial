@@ -221,7 +221,7 @@ pub fn consume_item(tokens: &mut TokenIter) -> Result<Item, Error> {
             )
         }
         Some(token) => {
-            if let Some(macro_) = consume_macro(tokens, attributes) {
+            if let Ok(macro_) = consume_macro(tokens, attributes) {
                 Item::Macro(macro_)
             } else {
                 panic!(

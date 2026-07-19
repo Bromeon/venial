@@ -28,6 +28,14 @@ pub(crate) enum NotFunction {
     ExternBlock,
 }
 
+/// Error type of [`consume_fn`], which gives ownership of attributes and visibility marker back
+/// to the caller, so they can be reused by fallback parsers.
+pub(crate) struct NotFunctionError {
+    pub kind: NotFunction,
+    pub attributes: Vec<Attribute>,
+    pub vis_marker: Option<VisMarker>,
+}
+
 pub(crate) fn consume_fn_qualifiers(tokens: &mut TokenIter) -> FnQualifiers {
     let tk_default = consume_ident(tokens, "default");
     let tk_const = consume_ident(tokens, "const");
@@ -147,7 +155,7 @@ pub(crate) fn consume_fn(
     tokens: &mut TokenIter,
     attributes: Vec<Attribute>,
     vis_marker: Option<VisMarker>,
-) -> Result<Function, NotFunction> {
+) -> Result<Function, NotFunctionError> {
     let before_start = tokens.checkpoint();
     let qualifiers = consume_fn_qualifiers(tokens);
 
@@ -159,11 +167,19 @@ pub(crate) fn consume_fn(
                 ident.clone()
             } else if qualifiers.tk_extern.is_some() && ident == "crate" {
                 tokens.rollback(before_start);
-                return Err(NotFunction::ExternCrate);
+                return Err(NotFunctionError {
+                    kind: NotFunction::ExternCrate,
+                    attributes,
+                    vis_marker,
+                });
             } else if ident == "static" {
                 // rollback iterator, could be start of const declaration
                 tokens.rollback(before_start);
-                return Err(NotFunction::Static);
+                return Err(NotFunctionError {
+                    kind: NotFunction::Static,
+                    attributes,
+                    vis_marker,
+                });
             } else if qualifiers.has_only_const_xor_unsafe() {
                 // This is not a function, detect what else it is.
                 // Note: detection already done here, because then we only need the lookahead/rollback once.
@@ -185,7 +201,11 @@ pub(crate) fn consume_fn(
 
                 // rollback iterator, could be start of const declaration
                 tokens.rollback(before_start);
-                return Err(declaration_type);
+                return Err(NotFunctionError {
+                    kind: declaration_type,
+                    attributes,
+                    vis_marker,
+                });
             } else {
                 panic!("expected 'fn' keyword, got ident '{}'", ident)
             }
@@ -194,7 +214,11 @@ pub(crate) fn consume_fn(
         // extern "C" { ...
         Some(TokenTree::Literal(_)) if qualifiers.tk_extern.is_some() => {
             tokens.rollback(before_start);
-            return Err(NotFunction::ExternBlock);
+            return Err(NotFunctionError {
+                kind: NotFunction::ExternBlock,
+                attributes,
+                vis_marker,
+            });
         }
 
         // extern { ...
@@ -202,7 +226,11 @@ pub(crate) fn consume_fn(
             if qualifiers.tk_extern.is_some() && group.delimiter() == Delimiter::Brace =>
         {
             tokens.rollback(before_start);
-            return Err(NotFunction::ExternBlock);
+            return Err(NotFunctionError {
+                kind: NotFunction::ExternBlock,
+                attributes,
+                vis_marker,
+            });
         }
 
         _ => {
@@ -253,20 +281,27 @@ pub(crate) fn consume_fn(
     })
 }
 
-pub(crate) fn consume_macro(tokens: &mut TokenIter, attributes: Vec<Attribute>) -> Option<Macro> {
+/// On failure, gives ownership of `attributes` back to the caller via the `Err` variant.
+pub(crate) fn consume_macro(
+    tokens: &mut TokenIter,
+    attributes: Vec<Attribute>,
+) -> Result<Macro, Vec<Attribute>> {
     let before_start = tokens.checkpoint();
 
-    match consume_macro_inner(tokens, attributes) {
-        Some(macro_) => Some(macro_),
+    match consume_macro_inner(tokens) {
+        Some(mut macro_) => {
+            macro_.attributes = attributes;
+            Ok(macro_)
+        }
         None => {
             // rollback iterator, could be start of const declaration
             tokens.rollback(before_start);
-            None
+            Err(attributes)
         }
     }
 }
 
-fn consume_macro_inner(tokens: &mut TokenIter, attributes: Vec<Attribute>) -> Option<Macro> {
+fn consume_macro_inner(tokens: &mut TokenIter) -> Option<Macro> {
     let name = consume_any_ident(tokens)?;
     let tk_bang = consume_punct(tokens, '!')?;
     let tk_declared_name = consume_any_ident(tokens);
@@ -286,7 +321,7 @@ fn consume_macro_inner(tokens: &mut TokenIter, attributes: Vec<Attribute>) -> Op
     };
 
     Some(Macro {
-        attributes,
+        attributes: Vec::new(), // filled in by consume_macro
         name,
         tk_bang,
         tk_declared_name,

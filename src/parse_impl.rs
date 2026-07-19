@@ -1,5 +1,5 @@
 use crate::parse_extern::{parse_extern_block, parse_extern_crate};
-use crate::parse_fn::{consume_fn, consume_macro, NotFunction};
+use crate::parse_fn::{consume_fn, consume_macro, NotFunction, NotFunctionError};
 use crate::parse_mod::parse_mod;
 use crate::parse_type::{consume_bound, consume_generic_params, consume_where_clause};
 use crate::parse_utils::{
@@ -133,36 +133,42 @@ pub(crate) fn consume_either_fn_type_const_static_impl(
 
             // Note: `static` is only used for extern "abi" {} blocks. Checked in call site.
             "default" | "const" | "static" | "async" | "unsafe" | "extern" | "fn" => {
-                match consume_fn(tokens, attributes.clone(), vis_marker.clone()) {
+                match consume_fn(tokens, attributes, vis_marker) {
                     Ok(method) => Item::Function(method),
-                    Err(NotFunction::Const) => {
-                        let constant = parse_const_or_static(tokens, attributes, vis_marker);
-                        Item::Constant(constant)
-                    }
-                    Err(NotFunction::Static) => {
-                        let static_decl = parse_const_or_static(tokens, attributes, vis_marker);
-                        Item::Constant(static_decl)
-                    }
-                    Err(NotFunction::Trait) => {
-                        let trait_decl = parse_trait(tokens, attributes, vis_marker);
-                        Item::Trait(trait_decl)
-                    }
-                    Err(NotFunction::Impl) => {
-                        let impl_decl = parse_impl(tokens, attributes);
-                        Item::Impl(impl_decl)
-                    }
-                    Err(NotFunction::Mod) => {
-                        let mod_decl = parse_mod(tokens, attributes, vis_marker);
-                        Item::Module(mod_decl)
-                    }
-                    Err(NotFunction::ExternBlock) => {
-                        let extern_decl = parse_extern_block(tokens, attributes, vis_marker);
-                        Item::ExternBlock(extern_decl)
-                    }
-                    Err(NotFunction::ExternCrate) => {
-                        let crate_decl = parse_extern_crate(tokens, attributes, vis_marker);
-                        Item::ExternCrate(crate_decl)
-                    }
+                    Err(NotFunctionError {
+                        kind,
+                        attributes,
+                        vis_marker,
+                    }) => match kind {
+                        NotFunction::Const => {
+                            let constant = parse_const_or_static(tokens, attributes, vis_marker);
+                            Item::Constant(constant)
+                        }
+                        NotFunction::Static => {
+                            let static_decl = parse_const_or_static(tokens, attributes, vis_marker);
+                            Item::Constant(static_decl)
+                        }
+                        NotFunction::Trait => {
+                            let trait_decl = parse_trait(tokens, attributes, vis_marker);
+                            Item::Trait(trait_decl)
+                        }
+                        NotFunction::Impl => {
+                            let impl_decl = parse_impl(tokens, attributes);
+                            Item::Impl(impl_decl)
+                        }
+                        NotFunction::Mod => {
+                            let mod_decl = parse_mod(tokens, attributes, vis_marker);
+                            Item::Module(mod_decl)
+                        }
+                        NotFunction::ExternBlock => {
+                            let extern_decl = parse_extern_block(tokens, attributes, vis_marker);
+                            Item::ExternBlock(extern_decl)
+                        }
+                        NotFunction::ExternCrate => {
+                            let crate_decl = parse_extern_crate(tokens, attributes, vis_marker);
+                            Item::ExternCrate(crate_decl)
+                        }
+                    },
                 }
             }
             ident => {
@@ -172,9 +178,9 @@ pub(crate) fn consume_either_fn_type_const_static_impl(
                         vis_marker.to_token_stream()
                     );
                 }
-                match consume_macro(tokens, attributes.clone()) {
-                    Some(macro_) => Item::Macro(macro_),
-                    None => panic!("unsupported {} item `{}`", context, ident),
+                match consume_macro(tokens, attributes) {
+                    Ok(macro_) => Item::Macro(macro_),
+                    Err(_attributes) => panic!("unsupported {} item `{}`", context, ident),
                 }
             }
         }
