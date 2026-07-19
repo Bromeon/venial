@@ -7,14 +7,12 @@ use crate::parse_utils::{
     consume_stuff_until, parse_any_ident, parse_punct,
 };
 use crate::punctuated::Punctuated;
+use crate::token_iter::TokenIter;
 use crate::types::{
     FnParam, FnQualifiers, FnReceiverParam, FnTypedParam, Function, GroupSpan, TypeExpr,
 };
 use crate::{Attribute, Macro, VisMarker};
 use proc_macro2::{Delimiter, Ident, Punct, TokenStream, TokenTree};
-use std::iter::Peekable;
-
-type TokenIter = Peekable<proc_macro2::token_stream::IntoIter>;
 
 /// If venial fails to parse the declaration as a function, it can detect that it
 /// is either a constant (`const` ambiguity), an impl or a module (`unsafe` ambiguity).
@@ -72,7 +70,7 @@ pub(crate) fn consume_fn_qualifiers(tokens: &mut TokenIter) -> FnQualifiers {
 fn parse_fn_params(tokens: TokenStream) -> Punctuated<FnParam> {
     let mut fields = Punctuated::new();
 
-    let mut tokens = tokens.into_iter().peekable();
+    let mut tokens = TokenIter::new(tokens);
     loop {
         if tokens.peek().is_none() {
             break;
@@ -150,8 +148,7 @@ pub(crate) fn consume_fn(
     attributes: Vec<Attribute>,
     vis_marker: Option<VisMarker>,
 ) -> Result<Function, NotFunction> {
-    // TODO consider multiple-lookahead instead of potentially cloning many tokens
-    let before_start = tokens.clone();
+    let before_start = tokens.checkpoint();
     let qualifiers = consume_fn_qualifiers(tokens);
 
     // fn keyword, or const fallback
@@ -161,11 +158,11 @@ pub(crate) fn consume_fn(
             if ident == "fn" {
                 ident.clone()
             } else if qualifiers.tk_extern.is_some() && ident == "crate" {
-                *tokens = before_start; // rollback
+                tokens.rollback(before_start);
                 return Err(NotFunction::ExternCrate);
             } else if ident == "static" {
                 // rollback iterator, could be start of const declaration
-                *tokens = before_start;
+                tokens.rollback(before_start);
                 return Err(NotFunction::Static);
             } else if qualifiers.has_only_const_xor_unsafe() {
                 // This is not a function, detect what else it is.
@@ -187,7 +184,7 @@ pub(crate) fn consume_fn(
                 };
 
                 // rollback iterator, could be start of const declaration
-                *tokens = before_start;
+                tokens.rollback(before_start);
                 return Err(declaration_type);
             } else {
                 panic!("expected 'fn' keyword, got ident '{}'", ident)
@@ -196,7 +193,7 @@ pub(crate) fn consume_fn(
 
         // extern "C" { ...
         Some(TokenTree::Literal(_)) if qualifiers.tk_extern.is_some() => {
-            *tokens = before_start; // rollback
+            tokens.rollback(before_start);
             return Err(NotFunction::ExternBlock);
         }
 
@@ -204,7 +201,7 @@ pub(crate) fn consume_fn(
         Some(TokenTree::Group(group))
             if qualifiers.tk_extern.is_some() && group.delimiter() == Delimiter::Brace =>
         {
-            *tokens = before_start; // rollback
+            tokens.rollback(before_start);
             return Err(NotFunction::ExternBlock);
         }
 
@@ -257,14 +254,13 @@ pub(crate) fn consume_fn(
 }
 
 pub(crate) fn consume_macro(tokens: &mut TokenIter, attributes: Vec<Attribute>) -> Option<Macro> {
-    // TODO consider multiple-lookahead instead of potentially cloning many tokens
-    let before_start = tokens.clone();
+    let before_start = tokens.checkpoint();
 
     match consume_macro_inner(tokens, attributes) {
         Some(macro_) => Some(macro_),
         None => {
             // rollback iterator, could be start of const declaration
-            *tokens = before_start;
+            tokens.rollback(before_start);
             None
         }
     }

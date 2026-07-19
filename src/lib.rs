@@ -114,10 +114,12 @@ mod parse_mod;
 mod parse_type;
 mod parse_utils;
 mod punctuated;
+mod token_iter;
 mod types;
 mod types_edition;
 
 pub use error::Error;
 pub use parse::{consume_item, parse_item};
 pub use punctuated::Punctuated;
+pub use token_iter::TokenIter;
 pub use types::*;

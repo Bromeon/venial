@@ -6,15 +6,13 @@ use crate::parse_utils::{
     consume_ident, consume_inner_attributes, consume_outer_attributes, consume_punct,
     consume_stuff_until, consume_vis_marker, parse_any_ident, parse_ident, parse_punct,
 };
+use crate::token_iter::TokenIter;
 use crate::types::{
     Attribute, Constant, GroupSpan, Impl, ImplMember, Item, Trait, TraitMember, TypeAlias,
     TypeExpr, ValueExpr, VisMarker,
 };
 use proc_macro2::{Delimiter, Group, TokenTree};
 use quote::ToTokens;
-use std::iter::Peekable;
-
-type TokenIter = Peekable<proc_macro2::token_stream::IntoIter>;
 
 pub(crate) fn parse_const_or_static(
     tokens: &mut TokenIter,
@@ -191,7 +189,7 @@ pub(crate) fn parse_impl_body(
 ) -> (GroupSpan, Vec<Attribute>, Vec<ImplMember>) {
     let mut body_items = vec![];
 
-    let mut tokens = token_group.stream().into_iter().peekable();
+    let mut tokens = TokenIter::new(token_group.stream());
     let inner_attributes = consume_inner_attributes(&mut tokens);
     loop {
         if tokens.peek().is_none() {

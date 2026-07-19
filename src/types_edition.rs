@@ -1,4 +1,5 @@
-use crate::parse_utils::{consume_path, tokens_from_slice};
+use crate::parse_utils::consume_path;
+use crate::token_iter::TokenIter;
 use crate::types::{
     Attribute, AttributeValue, Constant, Enum, EnumVariant, EnumVariantValue, ExternBlock,
     ExternCrate, Fields, FnQualifiers, Function, GenericArg, GenericArgList, GenericBound,
@@ -761,7 +762,7 @@ impl WhereClausePredicate {
     ///
     /// Panics if given a token stream that isn't a valid where-clause item.
     pub fn parse(tokens: TokenStream) -> Self {
-        let mut tokens = tokens.into_iter().peekable();
+        let mut tokens = TokenIter::new(tokens);
 
         let left_side = crate::parse_utils::consume_stuff_until(
             &mut tokens,
@@ -801,9 +802,9 @@ impl TypeExpr {
     /// If it does not match a path, `None` is returned.
     pub fn as_path(&self) -> Option<Path> {
         let tokens = if let Some(path) = self.unwrap_invisible_group() {
-            tokens_from_slice(&path)
+            TokenIter::from_vec(path)
         } else {
-            tokens_from_slice(&self.tokens)
+            TokenIter::from_slice(&self.tokens)
         };
 
         consume_path(tokens)

@@ -1,14 +1,7 @@
 use crate::parse_type::consume_generic_args;
+pub(crate) use crate::token_iter::TokenIter;
 use crate::types::{Attribute, AttributeValue, GroupSpan, Path, PathSegment, VisMarker};
-use proc_macro2::{Delimiter, Ident, Punct, Spacing, TokenStream, TokenTree};
-use std::iter::Peekable;
-
-pub(crate) type TokenIter = Peekable<proc_macro2::token_stream::IntoIter>;
-
-pub(crate) fn tokens_from_slice(slice: &[TokenTree]) -> TokenIter {
-    let stream = TokenStream::from_iter(slice.iter().cloned());
-    stream.into_iter().peekable()
-}
+use proc_macro2::{Delimiter, Ident, Punct, Spacing, TokenTree};
 
 pub(crate) fn parse_any_ident(tokens: &mut TokenIter, panic_context: &str) -> Ident {
     let next_token = tokens.next();
@@ -92,20 +85,16 @@ fn consume_attributes_with_inner(tokens: &mut TokenIter, expect_inner: bool) -> 
         };
 
         let tk_bang = if expect_inner {
-            // Memorize start position before next macro, to recognize boundary between #![...] and #[...]
-            // TODO consider multiple-lookahead instead of potentially cloning many tokens
-            let before_attribute = tokens.clone();
-            tokens.next(); // consume '#'
-
-            match tokens.peek() {
+            // Look past '#' to recognize boundary between #![...] and #[...]
+            match tokens.peek_n(1) {
                 Some(TokenTree::Punct(punct)) if punct.as_char() == '!' => {
                     let tk_bang = Some(punct.clone());
-                    tokens.next();
+                    tokens.next(); // consume '#'
+                    tokens.next(); // consume '!'
                     tk_bang
                 }
                 Some(TokenTree::Group(group)) if group.delimiter() == Delimiter::Bracket => {
                     // '#' followed by '[' -> we reached first outer attribute, stop here
-                    *tokens = before_attribute;
                     break;
                 }
                 _ => panic!("cannot parse inner attribute: expected '!' after '#' token"),
@@ -127,7 +116,7 @@ fn consume_attributes_with_inner(tokens: &mut TokenIter, expect_inner: bool) -> 
         };
 
         let tk_braces = GroupSpan::new(&group);
-        let mut attribute_tokens = group.stream().into_iter().peekable();
+        let mut attribute_tokens = TokenIter::new(group.stream());
 
         let mut path = Vec::new();
         loop {
@@ -280,21 +269,26 @@ pub(crate) fn consume_comma(tokens: &mut TokenIter) -> Option<Punct> {
 ///
 /// Does not advance `tokens` if the double colon is not found.
 pub(crate) fn consume_colon2(tokens: &mut TokenIter) -> Option<[Punct; 2]> {
-    // TODO consider multiple-lookahead instead of potentially cloning many tokens
-    let before_start = tokens.clone();
-
-    if let Some(TokenTree::Punct(first)) = tokens.next() {
-        if first.as_char() == ':' && first.spacing() == Spacing::Joint {
-            if let Some(TokenTree::Punct(second)) = tokens.next() {
-                if second.as_char() == ':' && second.spacing() == Spacing::Alone {
-                    return Some([first, second]);
-                }
-            }
+    let first = match tokens.peek_n(0) {
+        Some(TokenTree::Punct(punct))
+            if punct.as_char() == ':' && punct.spacing() == Spacing::Joint =>
+        {
+            punct.clone()
         }
-    }
+        _ => return None,
+    };
+    let second = match tokens.peek_n(1) {
+        Some(TokenTree::Punct(punct))
+            if punct.as_char() == ':' && punct.spacing() == Spacing::Alone =>
+        {
+            punct.clone()
+        }
+        _ => return None,
+    };
 
-    *tokens = before_start;
-    None
+    tokens.next();
+    tokens.next();
+    Some([first, second])
 }
 
 /// Tries to parse a path expressions; returns `None` if not matching.
@@ -324,11 +318,7 @@ pub(crate) fn consume_path(mut tokens: TokenIter) -> Option<Path> {
         }
 
         // Intermediate `::` are not optional
-        if let Some(separator) = consume_colon2(&mut tokens) {
-            tk_separator_colons = Some(separator);
-        } else {
-            return None;
-        }
+        tk_separator_colons = Some(consume_colon2(&mut tokens)?);
     }
 
     Some(Path { segments })

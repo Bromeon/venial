@@ -3,15 +3,13 @@ use crate::parse_utils::{
     consume_colon2, consume_comma, consume_ident, consume_outer_attributes, consume_punct,
     consume_stuff_until, consume_vis_marker, parse_any_ident, parse_punct,
 };
+use crate::token_iter::TokenIter;
 use crate::types::{
     EnumVariant, EnumVariantValue, Fields, GenericArg, GenericArgList, GenericBound, GenericParam,
     GenericParamList, GroupSpan, Lifetime, NamedField, NamedFields, Punctuated, TupleField,
     TupleFields, TypeExpr, WhereClause, WhereClausePredicate,
 };
 use proc_macro2::{Delimiter, Group, Ident, Punct, TokenStream, TokenTree};
-use std::iter::Peekable;
-
-type TokenIter = Peekable<proc_macro2::token_stream::IntoIter>;
 
 pub(crate) fn consume_item_name(tokens: &mut TokenIter) -> Ident {
     parse_any_ident(tokens, "item")
@@ -94,7 +92,7 @@ pub(crate) fn consume_generic_params(tokens: &mut TokenIter) -> Option<GenericPa
 
 fn parse_generic_arg(tokens: Vec<TokenTree>) -> GenericArg {
     // Note: method not called if tokens is empty
-    let mut tokens = tokens.into_iter().peekable();
+    let mut tokens = TokenIter::from_vec(tokens);
 
     if let Some(lifetime) = consume_lifetime(&mut tokens, true) {
         return GenericArg::Lifetime { lifetime };
@@ -103,7 +101,7 @@ fn parse_generic_arg(tokens: Vec<TokenTree>) -> GenericArg {
     // Then, try parsing Item = ...
     // (there is at least 1 token, so unwrap is safe)
     // TODO also handle generic bindings (eg `LendingIterator<Item<'_> = XXX>`)
-    let before_ident = tokens.clone();
+    let before_ident = tokens.checkpoint();
     if let TokenTree::Ident(ident) = tokens.next().unwrap() {
         if let Some(TokenTree::Punct(punct)) = tokens.next() {
             if punct.as_char() == '=' {
@@ -119,17 +117,15 @@ fn parse_generic_arg(tokens: Vec<TokenTree>) -> GenericArg {
     }
 
     // Last, all the rest is just tokens
-    let remaining: Vec<TokenTree> = before_ident.collect();
+    tokens.rollback(before_ident);
+    let remaining: Vec<TokenTree> = tokens.collect();
 
     GenericArg::TypeOrConst {
         expr: TypeExpr { tokens: remaining },
     }
 }
 
-pub(crate) fn consume_lifetime(
-    tokens: &mut Peekable<impl Iterator<Item = TokenTree>>,
-    expect_end: bool,
-) -> Option<Lifetime> {
+pub(crate) fn consume_lifetime(tokens: &mut TokenIter, expect_end: bool) -> Option<Lifetime> {
     // Try parsing 'lifetime
     let tk_apostrophe = match tokens.peek() {
         Some(TokenTree::Punct(punct)) if punct.as_char() == '\'' => {
@@ -168,20 +164,21 @@ pub(crate) fn consume_lifetime(
 }
 
 pub(crate) fn consume_generic_args(tokens: &mut TokenIter) -> Option<GenericArgList> {
-    // TODO consider multiple-lookahead instead of potentially cloning many tokens
-    let before_start = tokens.clone();
-    let tk_turbofish_colons = consume_colon2(tokens);
-
-    let tk_l_bracket = match tokens.peek() {
-        Some(TokenTree::Punct(punct)) if punct.as_char() == '<' => {
-            let gt = punct.clone();
-            tokens.next();
-            gt
-        }
+    // Either `<...>` directly, or turbofish `::<...>`. Decide via lookahead, without consuming.
+    let tk_turbofish_colons = match tokens.peek() {
+        Some(TokenTree::Punct(punct)) if punct.as_char() == '<' => None,
         _ => {
-            *tokens = before_start;
-            return None;
+            match tokens.peek_n(2) {
+                Some(TokenTree::Punct(punct)) if punct.as_char() == '<' => {}
+                _ => return None,
+            }
+            Some(consume_colon2(tokens)?)
         }
+    };
+
+    let tk_l_bracket = match tokens.next() {
+        Some(TokenTree::Punct(punct)) => punct,
+        _ => unreachable!(),
     };
 
     let mut generic_args = Punctuated::new();
@@ -326,7 +323,7 @@ pub(crate) fn consume_enum_discriminant(
 pub(crate) fn parse_tuple_fields(token_group: Group) -> TupleFields {
     let mut fields = Punctuated::new();
 
-    let mut tokens = token_group.stream().into_iter().peekable();
+    let mut tokens = TokenIter::new(token_group.stream());
     loop {
         if tokens.peek().is_none() {
             break;
@@ -358,7 +355,7 @@ pub(crate) fn parse_tuple_fields(token_group: Group) -> TupleFields {
 pub(crate) fn parse_named_fields(token_group: Group) -> NamedFields {
     let mut fields = Punctuated::new();
 
-    let mut tokens = token_group.stream().into_iter().peekable();
+    let mut tokens = TokenIter::new(token_group.stream());
     loop {
         if tokens.peek().is_none() {
             break;
@@ -394,7 +391,7 @@ pub(crate) fn parse_named_fields(token_group: Group) -> NamedFields {
 pub(crate) fn parse_enum_variants(tokens: TokenStream) -> Result<Punctuated<EnumVariant>, Error> {
     let mut variants = Punctuated::new();
 
-    let mut tokens = tokens.into_iter().peekable();
+    let mut tokens = TokenIter::new(tokens);
     loop {
         if tokens.peek().is_none() {
             break;

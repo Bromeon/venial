@@ -9,10 +9,9 @@ use crate::parse_type::{
     parse_named_fields, parse_tuple_fields,
 };
 use crate::parse_utils::{consume_outer_attributes, consume_punct, consume_vis_marker};
+use crate::token_iter::TokenIter;
 use crate::types::{Enum, Fields, GroupSpan, Item, Struct, Union};
-use proc_macro2::token_stream::IntoIter;
 use proc_macro2::{Delimiter, TokenStream, TokenTree};
-use std::iter::Peekable;
 
 /// Parses the token stream of an item declaration.
 ///
@@ -57,7 +56,7 @@ use std::iter::Peekable;
 /// }
 /// ```
 pub fn parse_item(tokens: TokenStream) -> Result<Item, Error> {
-    let mut tokens = tokens.into_iter().peekable();
+    let mut tokens = TokenIter::new(tokens);
     let declaration = consume_item(&mut tokens);
 
     if tokens.peek().is_some() {
@@ -83,7 +82,7 @@ pub fn parse_item(tokens: TokenStream) -> Result<Item, Error> {
 /// ## Errors
 ///
 /// Venial doesn't support enum discriminants with multiple non-grouped tokens.
-pub fn consume_item(tokens: &mut Peekable<IntoIter>) -> Result<Item, Error> {
+pub fn consume_item(tokens: &mut TokenIter) -> Result<Item, Error> {
     let attributes = consume_outer_attributes(tokens);
     let vis_marker = consume_vis_marker(tokens);
 

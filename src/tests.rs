@@ -28,7 +28,7 @@ fn parse_declaration_checked(tokens: TokenStream) -> Item {
 fn parse_generic_args_checked(tokens: TokenStream) -> GenericArgList {
     let initial_tokens = tokens.clone();
 
-    let mut token_iter = tokens.into_iter().peekable();
+    let mut token_iter = crate::TokenIter::new(tokens);
     let generic_args = consume_generic_args(&mut token_iter).unwrap();
 
     similar_asserts::assert_eq!(
