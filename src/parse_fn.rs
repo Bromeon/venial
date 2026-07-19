@@ -37,10 +37,37 @@ pub(crate) struct NotFunctionError {
 }
 
 pub(crate) fn consume_fn_qualifiers(tokens: &mut TokenIter) -> FnQualifiers {
-    let tk_default = consume_ident(tokens, "default");
-    let tk_const = consume_ident(tokens, "const");
-    let tk_async = consume_ident(tokens, "async");
-    let tk_unsafe = consume_ident(tokens, "unsafe");
+    let mut tk_default = None;
+    let mut tk_const = None;
+    let mut tk_async = None;
+    let mut tk_unsafe = None;
+
+    // Qualifiers appear in fixed order: `default const async unsafe extern`. `stage` tracks how
+    // far we are; anything out of order ends the loop (and fails the `fn` keyword check later).
+    // Ident-to-string conversion is done once per token, since it allocates in compiler mode.
+    let mut stage = 0;
+    while let Some(TokenTree::Ident(ident)) = tokens.peek() {
+        match ident.to_string().as_str() {
+            "default" if stage < 1 => {
+                tk_default = Some(ident.clone());
+                stage = 1;
+            }
+            "const" if stage < 2 => {
+                tk_const = Some(ident.clone());
+                stage = 2;
+            }
+            "async" if stage < 3 => {
+                tk_async = Some(ident.clone());
+                stage = 3;
+            }
+            "unsafe" if stage < 4 => {
+                tk_unsafe = Some(ident.clone());
+                stage = 4;
+            }
+            _ => break,
+        }
+        tokens.next();
+    }
 
     let tk_extern;
     let extern_abi;

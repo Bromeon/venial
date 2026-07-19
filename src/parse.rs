@@ -86,140 +86,149 @@ pub fn consume_item(tokens: &mut TokenIter) -> Result<Item, Error> {
     let attributes = consume_outer_attributes(tokens);
     let vis_marker = consume_vis_marker(tokens);
 
+    // Convert the keyword to a string once: `Ident == "str"` comparisons allocate a fresh
+    // String per comparison in compiler mode.
     let declaration = match tokens.peek().cloned() {
-        Some(TokenTree::Ident(keyword)) if keyword == "struct" => {
-            // struct keyword
-            tokens.next().unwrap();
+        Some(TokenTree::Ident(keyword)) => match keyword.to_string().as_str() {
+            "struct" => {
+                // struct keyword
+                tokens.next().unwrap();
 
-            let struct_name = consume_item_name(tokens);
-            let generic_params = consume_generic_params(tokens);
-            let mut where_clause = consume_where_clause(tokens);
+                let struct_name = consume_item_name(tokens);
+                let generic_params = consume_generic_params(tokens);
+                let mut where_clause = consume_where_clause(tokens);
 
-            let struct_fields = match tokens
-                .peek()
-                .expect("cannot parse struct: missing body or semicolon")
-            {
-                TokenTree::Punct(punct) if punct.as_char() == ';' => Fields::Unit,
-                TokenTree::Group(group) if group.delimiter() == Delimiter::Parenthesis => {
-                    let group = group.clone();
-                    // Consume group
-                    tokens.next();
-                    Fields::Tuple(parse_tuple_fields(group))
+                let struct_fields = match tokens
+                    .peek()
+                    .expect("cannot parse struct: missing body or semicolon")
+                {
+                    TokenTree::Punct(punct) if punct.as_char() == ';' => Fields::Unit,
+                    TokenTree::Group(group) if group.delimiter() == Delimiter::Parenthesis => {
+                        let group = group.clone();
+                        // Consume group
+                        tokens.next();
+                        Fields::Tuple(parse_tuple_fields(group))
+                    }
+                    TokenTree::Group(group) if group.delimiter() == Delimiter::Brace => {
+                        let group = group.clone();
+                        // Consume group
+                        tokens.next();
+                        Fields::Named(parse_named_fields(group))
+                    }
+                    token => panic!("cannot parse struct: unexpected token {:?}", token),
+                };
+
+                if matches!(struct_fields, Fields::Tuple(_)) {
+                    assert!(where_clause.is_none());
+                    where_clause = consume_where_clause(tokens);
                 }
-                TokenTree::Group(group) if group.delimiter() == Delimiter::Brace => {
-                    let group = group.clone();
-                    // Consume group
-                    tokens.next();
-                    Fields::Named(parse_named_fields(group))
-                }
-                token => panic!("cannot parse struct: unexpected token {:?}", token),
-            };
 
-            if matches!(struct_fields, Fields::Tuple(_)) {
-                assert!(where_clause.is_none());
-                where_clause = consume_where_clause(tokens);
+                let semicolon = consume_punct(tokens, ';');
+
+                Item::Struct(Struct {
+                    attributes,
+                    vis_marker,
+                    tk_struct: keyword,
+                    name: struct_name,
+                    generic_params,
+                    where_clause,
+                    fields: struct_fields,
+                    tk_semicolon: semicolon,
+                })
             }
+            "enum" => {
+                // enum keyword
+                tokens.next().unwrap();
 
-            let semicolon = consume_punct(tokens, ';');
+                let enum_name = consume_item_name(tokens);
+                let generic_params = consume_generic_params(tokens);
+                let where_clause = consume_where_clause(tokens);
 
-            Item::Struct(Struct {
-                attributes,
-                vis_marker,
-                tk_struct: keyword,
-                name: struct_name,
-                generic_params,
-                where_clause,
-                fields: struct_fields,
-                tk_semicolon: semicolon,
-            })
-        }
-        Some(TokenTree::Ident(keyword)) if keyword == "enum" => {
-            // enum keyword
-            tokens.next().unwrap();
+                let (group, enum_variants) = match tokens.next().unwrap() {
+                    TokenTree::Group(group) if group.delimiter() == Delimiter::Brace => {
+                        (group.clone(), parse_enum_variants(group.stream()))
+                    }
+                    token => panic!("cannot parse enum: unexpected token {:?}", token),
+                };
 
-            let enum_name = consume_item_name(tokens);
-            let generic_params = consume_generic_params(tokens);
-            let where_clause = consume_where_clause(tokens);
+                Item::Enum(Enum {
+                    attributes,
+                    vis_marker,
+                    tk_enum: keyword,
+                    name: enum_name,
+                    generic_params,
+                    where_clause,
+                    tk_braces: GroupSpan::new(&group),
+                    variants: enum_variants?,
+                })
+            }
+            "union" => {
+                // union keyword
+                tokens.next().unwrap();
 
-            let (group, enum_variants) = match tokens.next().unwrap() {
-                TokenTree::Group(group) if group.delimiter() == Delimiter::Brace => {
-                    (group.clone(), parse_enum_variants(group.stream()))
+                let union_name = consume_item_name(tokens);
+                let generic_params = consume_generic_params(tokens);
+                let where_clause = consume_where_clause(tokens);
+
+                let union_fields = match tokens.next().unwrap() {
+                    TokenTree::Group(group) if group.delimiter() == Delimiter::Brace => {
+                        parse_named_fields(group)
+                    }
+                    token => panic!("cannot parse union: unexpected token {:?}", token),
+                };
+
+                Item::Union(Union {
+                    attributes,
+                    vis_marker,
+                    tk_union: keyword,
+                    name: union_name,
+                    generic_params,
+                    where_clause,
+                    fields: union_fields,
+                })
+            }
+            "mod" => {
+                let mod_decl = parse_mod(tokens, attributes, vis_marker);
+                Item::Module(mod_decl)
+            }
+            "trait" => {
+                let trait_decl = parse_trait(tokens, attributes, vis_marker);
+                Item::Trait(trait_decl)
+            }
+            "impl" => {
+                let impl_decl = parse_impl(tokens, attributes);
+                Item::Impl(impl_decl)
+            }
+            "static" => {
+                let static_decl = parse_const_or_static(tokens, attributes, vis_marker);
+                Item::Constant(static_decl)
+            }
+            "use" => {
+                let use_decl = parse_use_declaration(tokens, attributes, vis_marker);
+
+                Item::UseDeclaration(use_decl)
+            }
+            // Note: fn qualifiers appear always in this order in Rust: default const async unsafe extern fn
+            "default" | "const" | "async" | "unsafe" | "extern" | "fn" | "type" => {
+                // Reuse impl parsing
+                consume_either_fn_type_const_static_impl(
+                    tokens,
+                    attributes,
+                    vis_marker,
+                    "fn/type/const/static/extern/extern crate",
+                )
+            }
+            _ => {
+                if let Ok(macro_) = consume_macro(tokens, attributes) {
+                    Item::Macro(macro_)
+                } else {
+                    panic!(
+                        "cannot parse declaration: expected keyword struct/enum/union/type/trait/impl/mod/default/const/async/unsafe/extern/fn/static or macro, found token {:?}",
+                        TokenTree::Ident(keyword)
+                    );
                 }
-                token => panic!("cannot parse enum: unexpected token {:?}", token),
-            };
-
-            Item::Enum(Enum {
-                attributes,
-                vis_marker,
-                tk_enum: keyword,
-                name: enum_name,
-                generic_params,
-                where_clause,
-                tk_braces: GroupSpan::new(&group),
-                variants: enum_variants?,
-            })
-        }
-        Some(TokenTree::Ident(keyword)) if keyword == "union" => {
-            // union keyword
-            tokens.next().unwrap();
-
-            let union_name = consume_item_name(tokens);
-            let generic_params = consume_generic_params(tokens);
-            let where_clause = consume_where_clause(tokens);
-
-            let union_fields = match tokens.next().unwrap() {
-                TokenTree::Group(group) if group.delimiter() == Delimiter::Brace => {
-                    parse_named_fields(group)
-                }
-                token => panic!("cannot parse union: unexpected token {:?}", token),
-            };
-
-            Item::Union(Union {
-                attributes,
-                vis_marker,
-                tk_union: keyword,
-                name: union_name,
-                generic_params,
-                where_clause,
-                fields: union_fields,
-            })
-        }
-        Some(TokenTree::Ident(keyword)) if keyword == "mod" => {
-            let mod_decl = parse_mod(tokens, attributes, vis_marker);
-            Item::Module(mod_decl)
-        }
-        Some(TokenTree::Ident(keyword)) if keyword == "trait" => {
-            let trait_decl = parse_trait(tokens, attributes, vis_marker);
-            Item::Trait(trait_decl)
-        }
-        Some(TokenTree::Ident(keyword)) if keyword == "impl" => {
-            let impl_decl = parse_impl(tokens, attributes);
-            Item::Impl(impl_decl)
-        }
-        Some(TokenTree::Ident(keyword)) if keyword == "static" => {
-            let static_decl = parse_const_or_static(tokens, attributes, vis_marker);
-            Item::Constant(static_decl)
-        }
-        Some(TokenTree::Ident(keyword)) if keyword == "use" => {
-            let use_decl = parse_use_declaration(tokens, attributes, vis_marker);
-
-            Item::UseDeclaration(use_decl)
-        }
-        // Note: fn qualifiers appear always in this order in Rust: default const async unsafe extern fn
-        Some(TokenTree::Ident(keyword))
-            if matches!(
-                keyword.to_string().as_str(),
-                "default" | "const" | "async" | "unsafe" | "extern" | "fn" | "type"
-            ) =>
-        {
-            // Reuse impl parsing
-            consume_either_fn_type_const_static_impl(
-                tokens,
-                attributes,
-                vis_marker,
-                "fn/type/const/static/extern/extern crate",
-            )
-        }
+            }
+        },
         Some(token) => {
             if let Ok(macro_) = consume_macro(tokens, attributes) {
                 Item::Macro(macro_)
