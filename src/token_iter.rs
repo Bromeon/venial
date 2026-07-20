@@ -1,28 +1,25 @@
 use proc_macro2::{TokenStream, TokenTree};
 
-/// Token iterator with O(1) checkpoint/rollback and arbitrary lookahead.
+/// Token iterator with arbitrary lookahead.
 ///
-/// Collects the stream into a buffer once; all navigation is index-based.
-/// Deliberately does NOT implement `Clone` — use `checkpoint()`/`rollback()`.
+/// Buffers the stream once; `peek_n` reads ahead without consuming, so parsing code can
+/// decide between alternatives before consuming anything. `next` moves tokens out without
+/// cloning. Deliberately does NOT implement `Clone` — parsers must use lookahead instead of
+/// backtracking.
 pub struct TokenIter {
-    tokens: Vec<TokenTree>,
-    pos: usize,
+    inner: std::vec::IntoIter<TokenTree>,
 }
-
-/// Opaque saved position, obtained from [`TokenIter::checkpoint`].
-pub(crate) struct Checkpoint(usize);
 
 impl TokenIter {
     /// Creates a token iterator from a token stream.
     pub fn new(stream: TokenStream) -> Self {
-        Self {
-            tokens: stream.into_iter().collect(),
-            pos: 0,
-        }
+        Self::from_vec(stream.into_iter().collect())
     }
 
     pub(crate) fn from_vec(tokens: Vec<TokenTree>) -> Self {
-        Self { tokens, pos: 0 }
+        Self {
+            inner: tokens.into_iter(),
+        }
     }
 
     pub(crate) fn from_slice(slice: &[TokenTree]) -> Self {
@@ -31,20 +28,12 @@ impl TokenIter {
 
     /// Peek at the next token without consuming it.
     pub fn peek(&self) -> Option<&TokenTree> {
-        self.tokens.get(self.pos)
+        self.inner.as_slice().first()
     }
 
     /// Peek `n` tokens ahead; `peek_n(0) == peek()`.
     pub(crate) fn peek_n(&self, n: usize) -> Option<&TokenTree> {
-        self.tokens.get(self.pos + n)
-    }
-
-    pub(crate) fn checkpoint(&self) -> Checkpoint {
-        Checkpoint(self.pos)
-    }
-
-    pub(crate) fn rollback(&mut self, checkpoint: Checkpoint) {
-        self.pos = checkpoint.0;
+        self.inner.as_slice().get(n)
     }
 }
 
@@ -52,9 +41,7 @@ impl Iterator for TokenIter {
     type Item = TokenTree;
 
     fn next(&mut self) -> Option<TokenTree> {
-        let tt = self.tokens.get(self.pos)?.clone();
-        self.pos += 1;
-        Some(tt)
+        self.inner.next()
     }
 }
 

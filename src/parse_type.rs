@@ -99,25 +99,24 @@ fn parse_generic_arg(tokens: Vec<TokenTree>) -> GenericArg {
     }
 
     // Then, try parsing Item = ...
-    // (there is at least 1 token, so unwrap is safe)
     // TODO also handle generic bindings (eg `LendingIterator<Item<'_> = XXX>`)
-    let before_ident = tokens.checkpoint();
-    if let TokenTree::Ident(ident) = tokens.next().unwrap() {
-        if let Some(TokenTree::Punct(punct)) = tokens.next() {
-            if punct.as_char() == '=' {
-                let remaining: Vec<TokenTree> = tokens.collect();
+    if matches!(tokens.peek_n(0), Some(TokenTree::Ident(_)))
+        && matches!(tokens.peek_n(1), Some(TokenTree::Punct(punct)) if punct.as_char() == '=')
+    {
+        let (ident, punct) = match (tokens.next(), tokens.next()) {
+            (Some(TokenTree::Ident(ident)), Some(TokenTree::Punct(punct))) => (ident, punct),
+            _ => unreachable!("matched by lookahead"),
+        };
+        let remaining: Vec<TokenTree> = tokens.collect();
 
-                return GenericArg::Binding {
-                    ident,
-                    tk_equals: punct,
-                    ty: TypeExpr { tokens: remaining },
-                };
-            }
-        }
+        return GenericArg::Binding {
+            ident,
+            tk_equals: punct,
+            ty: TypeExpr { tokens: remaining },
+        };
     }
 
     // Last, all the rest is just tokens
-    tokens.rollback(before_ident);
     let remaining: Vec<TokenTree> = tokens.collect();
 
     GenericArg::TypeOrConst {

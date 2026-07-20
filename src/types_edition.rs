@@ -2,9 +2,9 @@ use crate::parse_utils::consume_path;
 use crate::token_iter::TokenIter;
 use crate::types::{
     Attribute, AttributeValue, Constant, Enum, EnumVariant, EnumVariantValue, ExternBlock,
-    ExternCrate, Fields, FnQualifiers, Function, GenericArg, GenericArgList, GenericBound,
-    GenericParam, GenericParamList, GroupSpan, Impl, InlineGenericArgs, Item, Lifetime, Macro,
-    Module, NamedField, Path, Punctuated, Struct, Trait, TupleField, TypeAlias, TypeExpr, Union,
+    ExternCrate, Fields, Function, GenericArg, GenericArgList, GenericBound, GenericParam,
+    GenericParamList, GroupSpan, Impl, InlineGenericArgs, Item, Lifetime, Macro, Module,
+    NamedField, Path, Punctuated, Struct, Trait, TupleField, TypeAlias, TypeExpr, Union,
     UseDeclaration, VisMarker, WhereClause, WhereClausePredicate,
 };
 use proc_macro2::{Delimiter, Group, Ident, Literal, Punct, Spacing, Span, TokenStream, TokenTree};
@@ -538,18 +538,6 @@ impl EnumVariant {
             Fields::Unit => None,
             Fields::Named(_) => None,
         }
-    }
-}
-
-impl FnQualifiers {
-    /// Whether exactly either `const` or `unsafe` attribute is set, and no other one
-    /// (so the tokens could be the start of a constant or impl declaration)
-    pub(crate) fn has_only_const_xor_unsafe(&self) -> bool {
-        (self.tk_const.is_some() ^ self.tk_unsafe.is_some())
-            && self.tk_default.is_none()
-            && self.tk_async.is_none()
-            && self.tk_extern.is_none()
-            && self.extern_abi.is_none()
     }
 }
 

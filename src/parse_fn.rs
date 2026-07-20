@@ -183,86 +183,100 @@ pub(crate) fn consume_fn(
     attributes: Vec<Attribute>,
     vis_marker: Option<VisMarker>,
 ) -> Result<Function, NotFunctionError> {
-    let before_start = tokens.checkpoint();
-    let qualifiers = consume_fn_qualifiers(tokens);
+    // Scan the variable-length qualifier prefix (`default const async unsafe extern "abi"`)
+    // via lookahead, so fn vs. fallback is decided before consuming any token.
+    let mut n = 0;
+    let mut stage = 0;
+    let mut has_const = false;
+    let mut has_unsafe = false;
+    let mut has_extern = false;
+    let mut has_other_qualifier = false;
+    while let Some(TokenTree::Ident(ident)) = tokens.peek_n(n) {
+        match ident.to_string().as_str() {
+            "default" if stage < 1 => {
+                has_other_qualifier = true;
+                stage = 1;
+            }
+            "const" if stage < 2 => {
+                has_const = true;
+                stage = 2;
+            }
+            "async" if stage < 3 => {
+                has_other_qualifier = true;
+                stage = 3;
+            }
+            "unsafe" if stage < 4 => {
+                has_unsafe = true;
+                stage = 4;
+            }
+            "extern" if stage < 5 => {
+                has_extern = true;
+                stage = 5;
+                if let Some(TokenTree::Literal(_)) = tokens.peek_n(n + 1) {
+                    n += 1; // ABI literal
+                }
+            }
+            _ => break,
+        }
+        n += 1;
+    }
+    let const_xor_unsafe_only = (has_const ^ has_unsafe) && !has_other_qualifier && !has_extern;
 
-    // fn keyword, or const fallback
-    let next_token = tokens.next();
-    let tk_fn_keyword = match &next_token {
+    // fn keyword, or fallback to another item kind
+    let fallback_kind = match tokens.peek_n(n) {
         Some(TokenTree::Ident(ident)) => {
-            if ident == "fn" {
-                ident.clone()
-            } else if qualifiers.tk_extern.is_some() && ident == "crate" {
-                tokens.rollback(before_start);
-                return Err(NotFunctionError {
-                    kind: NotFunction::ExternCrate,
-                    attributes,
-                    vis_marker,
-                });
-            } else if ident == "static" {
-                // rollback iterator, could be start of const declaration
-                tokens.rollback(before_start);
-                return Err(NotFunctionError {
-                    kind: NotFunction::Static,
-                    attributes,
-                    vis_marker,
-                });
-            } else if qualifiers.has_only_const_xor_unsafe() {
+            let ident_str = ident.to_string();
+            if ident_str == "fn" {
+                None
+            } else if has_extern && ident_str == "crate" {
+                Some(NotFunction::ExternCrate)
+            } else if ident_str == "static" {
+                Some(NotFunction::Static)
+            } else if const_xor_unsafe_only {
                 // This is not a function, detect what else it is.
-                // Note: detection already done here, because then we only need the lookahead/rollback once.
-                let declaration_type = if qualifiers.tk_const.is_some() {
-                    NotFunction::Const
-                } else if qualifiers.tk_unsafe.is_some() {
-                    if ident == "trait" {
-                        NotFunction::Trait
-                    } else if ident == "impl" {
-                        NotFunction::Impl
-                    } else if ident == "mod" {
-                        NotFunction::Mod
-                    } else {
-                        panic!("expected one of 'fn|trait|impl|mod' after 'unsafe', got {ident:?}")
-                    }
+                if has_const {
+                    Some(NotFunction::Const)
                 } else {
-                    unreachable!()
-                };
-
-                // rollback iterator, could be start of const declaration
-                tokens.rollback(before_start);
-                return Err(NotFunctionError {
-                    kind: declaration_type,
-                    attributes,
-                    vis_marker,
-                });
+                    match ident_str.as_str() {
+                        "trait" => Some(NotFunction::Trait),
+                        "impl" => Some(NotFunction::Impl),
+                        "mod" => Some(NotFunction::Mod),
+                        _ => panic!(
+                            "expected one of 'fn|trait|impl|mod' after 'unsafe', got {ident:?}"
+                        ),
+                    }
+                }
             } else {
                 panic!("expected 'fn' keyword, got ident '{}'", ident)
             }
         }
 
         // extern "C" { ...
-        Some(TokenTree::Literal(_)) if qualifiers.tk_extern.is_some() => {
-            tokens.rollback(before_start);
-            return Err(NotFunctionError {
-                kind: NotFunction::ExternBlock,
-                attributes,
-                vis_marker,
-            });
-        }
+        Some(TokenTree::Literal(_)) if has_extern => Some(NotFunction::ExternBlock),
 
         // extern { ...
-        Some(TokenTree::Group(group))
-            if qualifiers.tk_extern.is_some() && group.delimiter() == Delimiter::Brace =>
-        {
-            tokens.rollback(before_start);
-            return Err(NotFunctionError {
-                kind: NotFunction::ExternBlock,
-                attributes,
-                vis_marker,
-            });
+        Some(TokenTree::Group(group)) if has_extern && group.delimiter() == Delimiter::Brace => {
+            Some(NotFunction::ExternBlock)
         }
 
         _ => {
             panic!("expected 'fn' keyword")
         }
+    };
+
+    if let Some(kind) = fallback_kind {
+        // Nothing was consumed, caller can parse the item as something else.
+        return Err(NotFunctionError {
+            kind,
+            attributes,
+            vis_marker,
+        });
+    }
+
+    let qualifiers = consume_fn_qualifiers(tokens);
+    let tk_fn_keyword = match tokens.next() {
+        Some(TokenTree::Ident(ident)) => ident,
+        _ => unreachable!("checked by qualifier lookahead"),
     };
 
     let fn_name = consume_item_name(tokens);
@@ -313,19 +327,16 @@ pub(crate) fn consume_macro(
     tokens: &mut TokenIter,
     attributes: Vec<Attribute>,
 ) -> Result<Macro, Vec<Attribute>> {
-    let before_start = tokens.checkpoint();
-
-    match consume_macro_inner(tokens) {
-        Some(mut macro_) => {
-            macro_.attributes = attributes;
-            Ok(macro_)
-        }
-        None => {
-            // rollback iterator, could be start of const declaration
-            tokens.rollback(before_start);
-            Err(attributes)
-        }
+    // `ident !` starts a macro invocation; anything else could be the start of another item.
+    let is_macro = matches!(tokens.peek_n(0), Some(TokenTree::Ident(_)))
+        && matches!(tokens.peek_n(1), Some(TokenTree::Punct(punct)) if punct.as_char() == '!');
+    if !is_macro {
+        return Err(attributes);
     }
+
+    let mut macro_ = consume_macro_inner(tokens).expect("matched by lookahead");
+    macro_.attributes = attributes;
+    Ok(macro_)
 }
 
 fn consume_macro_inner(tokens: &mut TokenIter) -> Option<Macro> {
