@@ -573,7 +573,7 @@ checksum = "d4c87d22b6e3f4a18d4d40ef354e97c90fcb14dd91d7dc0aa9d8a1172ebf7202"
 
 [[package]]
 name = "venial"
-version = "0.6.1"
+version = "0.7.0"
 dependencies = [
  "criterion",
  "insta",
