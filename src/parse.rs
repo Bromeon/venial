@@ -10,7 +10,7 @@ use crate::parse_type::{
 };
 use crate::parse_utils::{consume_outer_attributes, consume_punct, consume_vis_marker};
 use crate::token_iter::TokenIter;
-use crate::types::{Enum, Fields, GroupSpan, Item, Struct, Union};
+use crate::types::{Attribute, Enum, Fields, GroupSpan, Item, Struct, Union};
 use proc_macro2::{Delimiter, TokenStream, TokenTree};
 
 /// Parses the token stream of an item declaration.
@@ -218,30 +218,28 @@ pub fn consume_item(tokens: &mut TokenIter) -> Result<Item, Error> {
                     "fn/type/const/static/extern/extern crate",
                 )
             }
-            _ => {
-                if let Ok(macro_) = consume_macro(tokens, attributes) {
-                    Item::Macro(macro_)
-                } else {
-                    panic!(
-                        "cannot parse declaration: expected keyword struct/enum/union/type/trait/impl/mod/default/const/async/unsafe/extern/fn/static or macro, found token {:?}",
-                        TokenTree::Ident(keyword)
-                    );
-                }
-            }
+            _ => consume_macro_or_panic(tokens, attributes, &TokenTree::Ident(keyword)),
         },
-        Some(token) => {
-            if let Ok(macro_) = consume_macro(tokens, attributes) {
-                Item::Macro(macro_)
-            } else {
-                panic!(
-                    "cannot parse declaration: expected keyword struct/enum/union/type/trait/impl/mod/default/const/async/unsafe/extern/fn/static or macro, found token {:?}",
-                    token
-                );
-            }
-        }
+        Some(token) => consume_macro_or_panic(tokens, attributes, &token),
         None => {
             panic!("cannot parse type: expected keyword struct/enum/union/type/trait/impl/mod/default/const/async/unsafe/extern/fn/static or macro, found end-of-stream");
         }
     };
     Ok(declaration)
+}
+
+/// Fallback for tokens that start no known item keyword: the only remaining possibility is a macro
+/// invocation. `token` is the offending token, used for the panic message only.
+fn consume_macro_or_panic(
+    tokens: &mut TokenIter,
+    attributes: Vec<Attribute>,
+    token: &TokenTree,
+) -> Item {
+    match consume_macro(tokens, attributes) {
+        Ok(macro_) => Item::Macro(macro_),
+        Err(_attributes) => panic!(
+            "cannot parse declaration: expected keyword struct/enum/union/type/trait/impl/mod/default/const/async/unsafe/extern/fn/static or macro, found token {:?}",
+            token
+        ),
+    }
 }

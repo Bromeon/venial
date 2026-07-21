@@ -380,7 +380,10 @@ byte-identical insta snapshots.
 
 ### Actionables
 
-1. **Duplicated qualifier state machine (maintainability risk).** `consume_fn` (`src/parse_fn.rs:186-222`)
+Status after the follow-up review commit: **1 and 2 resolved**, 5 rejected (see below), 3 and 4
+still open (deliberately out of scope).
+
+1. **Duplicated qualifier state machine (maintainability risk).** — *resolved.* `consume_fn` (`src/parse_fn.rs:186-222`)
    re-implements the `default → const → async → unsafe → extern "abi"` ordering/staging logic
    from scratch via `peek_n`, purely to compute how many tokens to look past before deciding
    fn-vs-fallback. `consume_fn_qualifiers` (`src/parse_fn.rs:39-70`) implements the *same*
@@ -390,7 +393,15 @@ byte-identical insta snapshots.
    panic or an `unreachable!()` hit, not a compile error. Consider unifying: e.g. have
    `consume_fn` call `consume_fn_qualifiers`-style scanning once, sharing one function that
    either just counts (`usize`) or counts-and-builds depending on a flag.
-2. **`TokenIter::peek()` made `pub`, unplanned.** §6 of this plan only specifies `new`,
+
+   Fixed by extracting `scan_fn_qualifiers(&TokenIter) -> QualifierScan`, a single lookahead-only
+   scanner returning the token offset of each qualifier present plus the prefix length.
+   `consume_fn_qualifiers` builds `FnQualifiers` from those offsets and then advances the
+   iterator; `consume_fn` uses `scan.len` and `scan.has_only_const_xor_unsafe()`. One state
+   machine, one `to_string()` per qualifier token.
+
+2. **`TokenIter::peek()` made `pub`, unplanned.** — *resolved:* confirmed intentional, documented
+   in the CHANGELOG under a new "Added" section. §6 of this plan only specifies `new`,
    `From<TokenStream>`, and `Iterator` as public API; `checkpoint`/`rollback`/`peek_n` were to
    stay `pub(crate)` (moot now, since checkpoint/rollback no longer exist — see §0). `peek()`
    was made `pub` in commit `bda3791` because the benchmark harness needed it to detect
@@ -406,8 +417,23 @@ byte-identical insta snapshots.
    worktrees a given commit, copies/runs the current bench files against it, and diffs.
 4. **§7.2 not done** (already flagged in §0): no rustc self-profile run, no godot-rust A/B. Still
    just documented procedure, not executed.
-5. **Minor style nit:** `NotFunctionError` (`src/parse_fn.rs:33-37`) is `pub(crate)` but its
-   fields are declared `pub`. Harmless (crate visibility ceiling already limits access to the
-   same scope `pub(crate)` fields would), but inconsistent with the rest of the crate's style
-   where internal struct fields are typically bare (module-private) unless the struct itself is
-   part of the public API. Low priority, cosmetic only.
+5. **Minor style nit:** `NotFunctionError` is `pub(crate)` but its fields are declared `pub`.
+   — *rejected, the nit was wrong.* The fields are destructured from `parse_impl.rs`, a different
+   module, so bare (module-private) fields would not compile. `pub` fields on a `pub(crate)`
+   struct is the idiomatic spelling here; the struct's visibility already caps the effective one.
+
+### Additional fixes in the follow-up review commit
+
+- `consume_fn`'s doc comment claimed it returns `None` for a `const` fallback; it returns
+  `Err(NotFunctionError)` and covers seven fallback kinds. Rewritten, along with the stale
+  `NotFunction` enum doc (which listed three of the seven variants).
+- Removed a dead `Some(TokenTree::Literal(_)) if has_extern` arm in `consume_fn`, commented
+  `// extern "C" { ...`. The ABI literal is always part of the qualifier scan, so that arm could
+  only be reached by malformed input like `extern "C" "D"`; `extern "C" { ... }` hits the `Group`
+  arm. Dead since before this branch.
+- Merged `consume_macro_inner` into `consume_macro`. The inner function's `Option` return and the
+  `attributes: Vec::new()` placeholder overwritten by the caller both existed only because the
+  lookahead check lived in the outer function; with the check up front, the inner parse cannot
+  fail and attributes can be moved in directly.
+- Deduplicated the two identical macro-fallback panic sites in `consume_item` into
+  `consume_macro_or_panic`.

@@ -14,9 +14,11 @@ use crate::types::{
 use crate::{Attribute, Macro, VisMarker};
 use proc_macro2::{Delimiter, Ident, Punct, TokenStream, TokenTree};
 
-/// If venial fails to parse the declaration as a function, it can detect that it
-/// is either a constant (`const` ambiguity), an impl or a module (`unsafe` ambiguity).
-
+/// Which non-function item a declaration turned out to be.
+///
+/// The fn qualifier prefix is ambiguous: `const` also starts a constant, `unsafe` also starts a
+/// trait/impl/mod, `extern` also starts an extern crate or extern block. When venial detects one
+/// of those, it reports the item kind here so the caller can re-parse from the same position.
 #[derive(Debug)]
 pub(crate) enum NotFunction {
     Const,
@@ -36,70 +38,104 @@ pub(crate) struct NotFunctionError {
     pub vis_marker: Option<VisMarker>,
 }
 
-pub(crate) fn consume_fn_qualifiers(tokens: &mut TokenIter) -> FnQualifiers {
-    let mut tk_default = None;
-    let mut tk_const = None;
-    let mut tk_async = None;
-    let mut tk_unsafe = None;
+/// Result of [`scan_fn_qualifiers`]: the token offsets of each qualifier that is present.
+#[derive(Default)]
+struct QualifierScan {
+    /// Number of tokens the qualifier prefix spans; the `fn` keyword (or fallback token) is at
+    /// this offset.
+    len: usize,
+    tk_default: Option<usize>,
+    tk_const: Option<usize>,
+    tk_async: Option<usize>,
+    tk_unsafe: Option<usize>,
+    tk_extern: Option<usize>,
+    extern_abi: Option<usize>,
+}
 
-    // Qualifiers appear in fixed order: `default const async unsafe extern`. `stage` tracks how
-    // far we are; anything out of order ends the loop (and fails the `fn` keyword check later).
-    // Ident-to-string conversion is done once per token, since it allocates in compiler mode.
+impl QualifierScan {
+    /// Whether exactly either `const` or `unsafe` is set, and no other qualifier
+    /// (so the tokens could be the start of a constant, trait, impl or mod declaration).
+    fn has_only_const_xor_unsafe(&self) -> bool {
+        (self.tk_const.is_some() ^ self.tk_unsafe.is_some())
+            && self.tk_default.is_none()
+            && self.tk_async.is_none()
+            && self.tk_extern.is_none()
+    }
+}
+
+/// Scans the fn qualifier prefix by lookahead, without consuming anything.
+///
+/// Single source of truth for the qualifier grammar: [`consume_fn_qualifiers`] uses it to build
+/// [`FnQualifiers`], [`consume_fn`] uses it to decide fn-vs-fallback before consuming a token.
+fn scan_fn_qualifiers(tokens: &TokenIter) -> QualifierScan {
+    // Qualifiers appear in fixed order: `default const async unsafe extern "abi"`. `stage` tracks
+    // how far we are; anything out of order ends the scan (and fails the `fn` keyword check at the
+    // call site). Ident-to-string conversion is done once per token, since it allocates in
+    // compiler mode.
+    let mut scan = QualifierScan::default();
     let mut stage = 0;
-    while let Some(TokenTree::Ident(ident)) = tokens.peek() {
+    while let Some(TokenTree::Ident(ident)) = tokens.peek_n(scan.len) {
+        let index = scan.len;
         match ident.to_string().as_str() {
             "default" if stage < 1 => {
-                tk_default = Some(ident.clone());
+                scan.tk_default = Some(index);
                 stage = 1;
             }
             "const" if stage < 2 => {
-                tk_const = Some(ident.clone());
+                scan.tk_const = Some(index);
                 stage = 2;
             }
             "async" if stage < 3 => {
-                tk_async = Some(ident.clone());
+                scan.tk_async = Some(index);
                 stage = 3;
             }
             "unsafe" if stage < 4 => {
-                tk_unsafe = Some(ident.clone());
+                scan.tk_unsafe = Some(index);
                 stage = 4;
+            }
+            "extern" if stage < 5 => {
+                scan.tk_extern = Some(index);
+                stage = 5;
+                if let Some(TokenTree::Literal(_)) = tokens.peek_n(index + 1) {
+                    scan.extern_abi = Some(index + 1);
+                    scan.len += 1;
+                }
             }
             _ => break,
         }
+        scan.len += 1;
+    }
+
+    scan
+}
+
+pub(crate) fn consume_fn_qualifiers(tokens: &mut TokenIter) -> FnQualifiers {
+    fn ident_at(tokens: &TokenIter, index: Option<usize>) -> Option<Ident> {
+        match tokens.peek_n(index?) {
+            Some(TokenTree::Ident(ident)) => Some(ident.clone()),
+            other => unreachable!("qualifier scan pointed at non-ident token {:?}", other),
+        }
+    }
+
+    let scan = scan_fn_qualifiers(tokens);
+    let qualifiers = FnQualifiers {
+        tk_default: ident_at(tokens, scan.tk_default),
+        tk_const: ident_at(tokens, scan.tk_const),
+        tk_async: ident_at(tokens, scan.tk_async),
+        tk_unsafe: ident_at(tokens, scan.tk_unsafe),
+        tk_extern: ident_at(tokens, scan.tk_extern),
+        extern_abi: match scan.extern_abi.and_then(|index| tokens.peek_n(index)) {
+            Some(TokenTree::Literal(literal)) => Some(literal.clone()),
+            Some(other) => unreachable!("qualifier scan pointed at non-literal token {:?}", other),
+            None => None,
+        },
+    };
+
+    for _ in 0..scan.len {
         tokens.next();
     }
 
-    let tk_extern;
-    let extern_abi;
-    match tokens.peek() {
-        Some(TokenTree::Ident(ident)) if ident == "extern" => {
-            tk_extern = Some(ident.clone());
-            tokens.next();
-
-            match tokens.peek() {
-                Some(TokenTree::Literal(literal)) => {
-                    extern_abi = Some(literal.clone());
-                    tokens.next();
-                }
-                _ => {
-                    extern_abi = None;
-                }
-            }
-        }
-        _ => {
-            tk_extern = None;
-            extern_abi = None;
-        }
-    };
-
-    FnQualifiers {
-        tk_default,
-        tk_const,
-        tk_async,
-        tk_unsafe,
-        tk_extern,
-        extern_abi,
-    }
+    qualifiers
 }
 
 fn parse_fn_params(tokens: TokenStream) -> Punctuated<FnParam> {
@@ -176,8 +212,10 @@ fn consume_fn_return(tokens: &mut TokenIter) -> Option<([Punct; 2], TypeExpr)> {
 /// Tries to parse a function definition.
 ///
 /// Panics when the following tokens do not constitute a function definition, with one exception:
-/// when `const` is followed by an identifier which is not `fn`, then `None` is returned. This is to
-/// allow fallback to a constant declaration (both can begin with the `const` token).
+/// when the qualifier prefix is ambiguous (`const`, `unsafe`, `extern`) and is followed by a
+/// keyword starting another item kind, then `Err` is returned. Nothing is consumed in that case,
+/// so the caller can re-parse the same tokens as that item kind. The `Err` value also hands
+/// `attributes` and `vis_marker` back, to avoid cloning them on the (common) success path.
 pub(crate) fn consume_fn(
     tokens: &mut TokenIter,
     attributes: Vec<Attribute>,
@@ -185,45 +223,11 @@ pub(crate) fn consume_fn(
 ) -> Result<Function, NotFunctionError> {
     // Scan the variable-length qualifier prefix (`default const async unsafe extern "abi"`)
     // via lookahead, so fn vs. fallback is decided before consuming any token.
-    let mut n = 0;
-    let mut stage = 0;
-    let mut has_const = false;
-    let mut has_unsafe = false;
-    let mut has_extern = false;
-    let mut has_other_qualifier = false;
-    while let Some(TokenTree::Ident(ident)) = tokens.peek_n(n) {
-        match ident.to_string().as_str() {
-            "default" if stage < 1 => {
-                has_other_qualifier = true;
-                stage = 1;
-            }
-            "const" if stage < 2 => {
-                has_const = true;
-                stage = 2;
-            }
-            "async" if stage < 3 => {
-                has_other_qualifier = true;
-                stage = 3;
-            }
-            "unsafe" if stage < 4 => {
-                has_unsafe = true;
-                stage = 4;
-            }
-            "extern" if stage < 5 => {
-                has_extern = true;
-                stage = 5;
-                if let Some(TokenTree::Literal(_)) = tokens.peek_n(n + 1) {
-                    n += 1; // ABI literal
-                }
-            }
-            _ => break,
-        }
-        n += 1;
-    }
-    let const_xor_unsafe_only = (has_const ^ has_unsafe) && !has_other_qualifier && !has_extern;
+    let scan = scan_fn_qualifiers(tokens);
+    let has_extern = scan.tk_extern.is_some();
 
     // fn keyword, or fallback to another item kind
-    let fallback_kind = match tokens.peek_n(n) {
+    let fallback_kind = match tokens.peek_n(scan.len) {
         Some(TokenTree::Ident(ident)) => {
             let ident_str = ident.to_string();
             if ident_str == "fn" {
@@ -232,9 +236,9 @@ pub(crate) fn consume_fn(
                 Some(NotFunction::ExternCrate)
             } else if ident_str == "static" {
                 Some(NotFunction::Static)
-            } else if const_xor_unsafe_only {
+            } else if scan.has_only_const_xor_unsafe() {
                 // This is not a function, detect what else it is.
-                if has_const {
+                if scan.tk_const.is_some() {
                     Some(NotFunction::Const)
                 } else {
                     match ident_str.as_str() {
@@ -251,10 +255,7 @@ pub(crate) fn consume_fn(
             }
         }
 
-        // extern "C" { ...
-        Some(TokenTree::Literal(_)) if has_extern => Some(NotFunction::ExternBlock),
-
-        // extern { ...
+        // extern { ... or extern "C" { ... (the ABI literal, if any, is part of the scan)
         Some(TokenTree::Group(group)) if has_extern && group.delimiter() == Delimiter::Brace => {
             Some(NotFunction::ExternBlock)
         }
@@ -334,14 +335,8 @@ pub(crate) fn consume_macro(
         return Err(attributes);
     }
 
-    let mut macro_ = consume_macro_inner(tokens).expect("matched by lookahead");
-    macro_.attributes = attributes;
-    Ok(macro_)
-}
-
-fn consume_macro_inner(tokens: &mut TokenIter) -> Option<Macro> {
-    let name = consume_any_ident(tokens)?;
-    let tk_bang = consume_punct(tokens, '!')?;
+    let name = parse_any_ident(tokens, "macro name");
+    let tk_bang = parse_punct(tokens, '!', "macro invocation");
     let tk_declared_name = consume_any_ident(tokens);
 
     let (is_paren, macro_body) = match tokens.next().expect("unexpected end of macro") {
@@ -358,8 +353,8 @@ fn consume_macro_inner(tokens: &mut TokenIter) -> Option<Macro> {
         None
     };
 
-    Some(Macro {
-        attributes: Vec::new(), // filled in by consume_macro
+    Ok(Macro {
+        attributes,
         name,
         tk_bang,
         tk_declared_name,

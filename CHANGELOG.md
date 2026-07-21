@@ -11,6 +11,13 @@ Performance rework of the parser's token iteration. No change in parsing behavio
   `TokenIter::new(stream)` or `TokenIter::from(stream)`; it implements `Iterator` and offers
   `peek()`.
 
+### Added
+
+- `venial::TokenIter`, a new public type: an owning token iterator with `new`,
+  `From<TokenStream>`, `Iterator` and `peek()`. `peek()` is what lets callers parse several items
+  from one stream, by detecting end-of-stream between `consume_item` calls. It deliberately does
+  not implement `Clone`.
+
 ### Performance
 
 - Token iteration no longer clones the remaining iterator for backtracking; all speculative
